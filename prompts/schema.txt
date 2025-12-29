@@ -1,0 +1,112 @@
+Database Schema: E-Commerce / Sales (Hackathon Version)
+
+This document describes the structure of the SQLite database.
+Use this context to generate accurate SQL queries.
+
+TABLE: customers
+
+Primary Key: id
+Description: Stores user profiles.
+
+Columns:
+
+id (INTEGER)
+
+Unique identifier for the customer.
+
+name (TEXT)
+
+Full name of the customer (e.g., "Jane Doe").
+
+email (TEXT)
+
+Customer's email address.
+
+join_date (TEXT)
+
+Date the customer signed up. Format: YYYY-MM-DD.
+
+Usage: Use for cohort analysis or "new users over time".
+
+country (TEXT)
+
+The country where the customer resides.
+
+Usage: Use for geographic segmentation (Bar charts/Maps).
+
+TABLE: products
+
+Primary Key: id
+Description: Inventory of items available for sale.
+
+Columns:
+
+id (INTEGER)
+
+Unique identifier for the product.
+
+name (TEXT)
+
+Name of the product (e.g., "Wireless Headphones").
+
+category (TEXT)
+
+Broad category (e.g., "Electronics", "Clothing", "Home").
+
+Usage: Critical for category performance pie charts.
+
+price (REAL)
+
+Unit price of a single item in USD.
+
+stock_quantity (INTEGER)
+
+Current number of items available in inventory.
+
+TABLE: orders
+
+Primary Key: id
+Description: Transactional records of sales.
+Note: For this simplified schema, each order represents a purchase of a single product type.
+
+Columns:
+
+id (INTEGER)
+
+Unique identifier for the order.
+
+customer_id (INTEGER)
+
+Foreign Key links to customers.id.
+
+product_id (INTEGER)
+
+Foreign Key links to products.id.
+
+order_date (TEXT)
+
+Date the purchase was made. Format: YYYY-MM-DD.
+
+Usage: PRIMARY field for all time-series/trend analysis (Line charts).
+
+quantity (INTEGER)
+
+Number of units purchased in this order.
+
+total_amount (REAL)
+
+The total revenue for this specific order (calculated as price * quantity).
+
+Usage: Use this for "Total Revenue" calculations (SUM).
+
+Important Notes for AI
+
+Strict Schema Adherence: You must ONLY use the tables and columns listed above. Do not infer columns like first_name, address, or discount as they do not exist.
+
+Joins: - To link Customers to Products, you must JOIN through the orders table.
+
+Example path: customers -> orders -> products.
+
+Date Handling: All dates are stored as TEXT in 'YYYY-MM-DD' format. Use SQLite date functions (e.g., strftime('%Y-%m', order_date)) for aggregation by month or year.
+
+Clarification: If a user asks for data not present here (e.g., "shipping status" or "customer age"), explicitly state that the data is not available in the current schema.
