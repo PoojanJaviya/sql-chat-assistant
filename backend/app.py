@@ -1,10 +1,12 @@
 import os
 import re
 import json
+import sqlite3
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
 from dotenv import load_dotenv
+from safety import is_safe_query
 
 # Load environment variables
 load_dotenv()
@@ -15,6 +17,7 @@ CORS(app)  # Enable CORS for frontend communication
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "hackathon.db")
 
 # Configure Gemini
 if not GEMINI_API_KEY:
@@ -115,6 +118,52 @@ def ask():
             "success": False, 
             "error": str(e)
         }), 500
+
+@app.route('/execute', methods=['POST'])
+def execute_sql():
+    try:
+        data = request.json
+        sql = data.get("sql")
+
+        if not sql:
+            return jsonify({"success": False, "error": "No SQL query provided"}), 400
+
+        # Safety Check
+        safe, reason = is_safe_query(sql)
+        if not safe:
+            return jsonify({"success": False, "error": f"Safety Violation: {reason}"}), 403
+
+        # Execute on SQLite
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(sql)
+            
+            # If it's a SELECT query, fetch data
+            if cursor.description:
+                columns = [desc[0] for desc in cursor.description]
+                rows = cursor.fetchall()
+            else:
+                # For INSERT/UPDATE/DELETE, commit changes
+                conn.commit()
+                columns = []
+                rows = []
+                
+            conn.close()
+
+            return jsonify({
+                "success": True,
+                "columns": columns,
+                "rows": rows
+            })
+            
+        except Exception as db_err:
+            conn.close()
+            return jsonify({"success": False, "error": str(db_err)}), 500
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
