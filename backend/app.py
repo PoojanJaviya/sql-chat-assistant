@@ -4,7 +4,7 @@ import json
 import sqlite3
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 from safety import is_safe_query
 
@@ -19,19 +19,20 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "hackathon.db")
 
-# Configure Gemini
+# Configure Gemini Client
+client = None
 if not GEMINI_API_KEY:
     print("WARNING: GEMINI_API_KEY not found in environment variables.")
 else:
-    genai.configure(api_key=GEMINI_API_KEY)
-    # Using the latest model
-    model = genai.GenerativeModel('gemini-2.0-flash-exp') 
+    # New SDK initialization
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 def load_file_content(filename):
     """Safe file reading helper"""
     filepath = os.path.join(PROMPTS_DIR, filename)
     try:
-        with open(filepath, "r") as f:
+        # FIX: Added encoding="utf-8" to prevent Windows UnicodeDecodeError
+        with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         print(f"Error: Could not find {filepath}")
@@ -59,7 +60,6 @@ def parse_gemini_response(text):
             response_data["sql"] = sql_match.group(1).strip()
 
         # Extract Explanation
-        # Looks for text between ## Explanation and ## Visualization
         explanation_match = re.search(r"## Explanation\s*(.*?)\s*(?:## Visualization|$)", text, re.DOTALL)
         if explanation_match:
             response_data["explanation"] = explanation_match.group(1).strip()
@@ -76,7 +76,6 @@ def parse_gemini_response(text):
 
     except Exception as e:
         print(f"Parsing error: {e}")
-        # Fallback: if parsing fails, at least return the explanation as the raw text
         if not response_data["explanation"]:
             response_data["explanation"] = text
 
@@ -100,8 +99,15 @@ def ask():
             f"{user_question}"
         )
 
-        # Call Gemini
-        response = model.generate_content(full_prompt)
+        if not client:
+             return jsonify({"success": False, "error": "Gemini API Key missing or client not initialized"}), 500
+
+        # Call Gemini (New SDK usage)
+        # UPDATED: Using 'gemini-flash-latest' to resolve quota issues
+        response = client.models.generate_content(
+            model='gemini-flash-latest', 
+            contents=full_prompt
+        )
         raw_text = response.text
 
         # Parse the structured response
@@ -164,6 +170,14 @@ def execute_sql():
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/', methods=['GET'])
+def health_check():
+    return jsonify({
+        "status": "online",
+        "message": "SQL Chat Assistant Backend is running.",
+        "endpoints": ["POST /ask", "POST /execute"]
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

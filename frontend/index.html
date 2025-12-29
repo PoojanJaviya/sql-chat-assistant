@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Chat Assistant</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Axios -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        /* Custom scrollbar for table */
+        .custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #1e293b; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div id="root" class="h-screen flex flex-col"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- CONFIG ---
+        const API_BASE = "http://127.0.0.1:5000";
+
+        // --- COMPONENTS ---
+
+        // 1. Data Table Component
+        const DataTable = ({ data, columns }) => {
+            if (!data || data.length === 0) return <div className="text-gray-400 italic p-4">No data returned.</div>;
+
+            return (
+                <div className="overflow-x-auto custom-scroll mt-4 rounded-lg border border-gray-700">
+                    <table className="min-w-full text-sm text-left">
+                        <thead className="text-xs uppercase bg-slate-800 text-gray-300">
+                            <tr>
+                                {columns.map((col, idx) => (
+                                    <th key={idx} className="px-6 py-3 whitespace-nowrap">{col}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="bg-slate-900 divide-y divide-gray-700">
+                            {data.map((row, rIdx) => (
+                                <tr key={rIdx} className="hover:bg-slate-800 transition-colors">
+                                    {row.map((cell, cIdx) => (
+                                        <td key={cIdx} className="px-6 py-4 whitespace-nowrap text-gray-300">
+                                            {cell}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+
+        // 2. Message Bubble Component
+        const MessageBubble = ({ message, onRunSQL }) => {
+            const isUser = message.role === 'user';
+            
+            return (
+                <div className={`flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-5 shadow-lg ${
+                        isUser 
+                        ? 'bg-blue-600 text-white rounded-br-none' 
+                        : 'bg-slate-800 border border-slate-700 rounded-bl-none'
+                    }`}>
+                        {/* Header icon */}
+                        <div className="flex items-center gap-2 mb-2 opacity-75 text-xs font-bold uppercase tracking-wider">
+                            {isUser ? <i className="fas fa-user"></i> : <i className="fas fa-robot text-emerald-400"></i>}
+                            <span>{isUser ? 'You' : 'Assistant'}</span>
+                        </div>
+
+                        {/* Content */}
+                        <div className="whitespace-pre-wrap leading-relaxed">
+                            {message.content}
+                        </div>
+
+                        {/* SQL Code Block (if present) */}
+                        {message.sql && (
+                            <div className="mt-4 bg-slate-950 rounded-lg overflow-hidden border border-slate-700">
+                                <div className="bg-slate-900 px-3 py-1 text-xs text-gray-400 border-b border-slate-700 flex justify-between items-center">
+                                    <span>SQL GENERATED</span>
+                                    <span className="text-emerald-500 text-[10px]"><i className="fas fa-check-circle"></i> Validated</span>
+                                </div>
+                                <code className="block p-3 font-mono text-sm text-blue-300 overflow-x-auto">
+                                    {message.sql}
+                                </code>
+                                
+                                {/* Execution Controls */}
+                                {!message.result && !message.error && (
+                                    <div className="p-2 bg-slate-900 border-t border-slate-700 flex justify-end">
+                                        <button 
+                                            onClick={() => onRunSQL(message.id, message.sql)}
+                                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md transition-all flex items-center gap-2"
+                                        >
+                                            <i className="fas fa-play"></i> Run Query
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Execution Result (Table) */}
+                        {message.result && (
+                            <div className="mt-4 animate-fade-in">
+                                <div className="flex items-center gap-2 text-xs text-emerald-400 mb-1">
+                                    <i className="fas fa-table"></i>
+                                    <span>Query Results ({message.result.rows.length} rows)</span>
+                                </div>
+                                <DataTable data={message.result.rows} columns={message.result.columns} />
+                            </div>
+                        )}
+
+                        {/* Error Display */}
+                        {message.error && (
+                            <div className="mt-4 p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm flex items-start gap-2">
+                                <i className="fas fa-exclamation-triangle mt-1"></i>
+                                <span>{message.error}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // 3. Main App Component
+        const App = () => {
+            const [input, setInput] = useState("");
+            const [messages, setMessages] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const messagesEndRef = useRef(null);
+
+            const scrollToBottom = () => {
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            useEffect(() => {
+                scrollToBottom();
+            }, [messages]);
+
+            // Initial greeting
+            useEffect(() => {
+                setMessages([{
+                    id: Date.now(),
+                    role: 'ai',
+                    content: "Hello! I'm your SQL Assistant. Ask me questions about your sales data, products, or customers.\n\nTry: 'Show me total revenue by month for 2023'"
+                }]);
+            }, []);
+
+            const handleAsk = async (e) => {
+                e.preventDefault();
+                if (!input.trim() || loading) return;
+
+                const userText = input;
+                setInput("");
+                
+                // Add User Message
+                const userMsg = { id: Date.now(), role: 'user', content: userText };
+                setMessages(prev => [...prev, userMsg]);
+                setLoading(true);
+
+                try {
+                    // Call Backend /ask
+                    const response = await axios.post(`${API_BASE}/ask`, { question: userText });
+                    const data = response.data;
+
+                    if (data.success) {
+                        setMessages(prev => [...prev, {
+                            id: Date.now() + 1,
+                            role: 'ai',
+                            content: data.explanation,
+                            sql: data.sql,
+                            visualization: data.visualization
+                        }]);
+                    } else {
+                        setMessages(prev => [...prev, {
+                            id: Date.now() + 1,
+                            role: 'ai',
+                            content: "I encountered an error processing your request.",
+                            error: data.error
+                        }]);
+                    }
+                } catch (err) {
+                    // ERROR HANDLING FIX: Extract the actual server message if available
+                    console.error("API Call Failed:", err);
+                    const serverError = err.response?.data?.error || err.message || "Unknown Network Error";
+                    
+                    setMessages(prev => [...prev, {
+                        id: Date.now() + 1,
+                        role: 'ai',
+                        content: "Server Error occurred.",
+                        error: serverError
+                    }]);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleRunSQL = async (msgId, sql) => {
+                try {
+                    const response = await axios.post(`${API_BASE}/execute`, { sql });
+                    const data = response.data;
+
+                    setMessages(prev => prev.map(msg => {
+                        if (msg.id === msgId) {
+                            if (data.success) {
+                                return { ...msg, result: { columns: data.columns, rows: data.rows } };
+                            } else {
+                                return { ...msg, error: data.error };
+                            }
+                        }
+                        return msg;
+                    }));
+
+                } catch (err) {
+                    const serverError = err.response?.data?.error || err.message;
+                    setMessages(prev => prev.map(msg => {
+                        if (msg.id === msgId) {
+                            return { ...msg, error: "Execution Failed: " + serverError };
+                        }
+                        return msg;
+                    }));
+                }
+            };
+
+            return (
+                <div className="flex flex-col h-full max-w-5xl mx-auto w-full shadow-2xl bg-slate-900">
+                    {/* Header */}
+                    <header className="p-4 bg-slate-800 border-b border-slate-700 flex items-center justify-between z-10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+                                <i className="fas fa-database text-white"></i>
+                            </div>
+                            <div>
+                                <h1 className="font-bold text-xl text-white tracking-tight">SQL Chat Assistant</h1>
+                                <p className="text-xs text-blue-400 flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    System Online
+                                </p>
+                            </div>
+                        </div>
+                        <button className="text-slate-400 hover:text-white transition-colors">
+                            <i className="fas fa-cog"></i>
+                        </button>
+                    </header>
+
+                    {/* Chat Area */}
+                    <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-900 custom-scroll relative">
+                        {messages.map(msg => (
+                            <MessageBubble key={msg.id} message={msg} onRunSQL={handleRunSQL} />
+                        ))}
+                        
+                        {loading && (
+                            <div className="flex justify-start mb-6">
+                                <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-bl-none p-4 flex items-center gap-3">
+                                    <div className="flex space-x-1">
+                                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
+                                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+                                    </div>
+                                    <span className="text-sm text-gray-400">Thinking...</span>
+                                </div>
+                            </div>
+                        )}
+                        <div ref={messagesEndRef} />
+                    </main>
+
+                    {/* Input Area */}
+                    <footer className="p-4 bg-slate-800 border-t border-slate-700">
+                        <form onSubmit={handleAsk} className="relative max-w-4xl mx-auto">
+                            <input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                placeholder="Ask a question about your data..."
+                                className="w-full bg-slate-900 text-white placeholder-slate-500 border border-slate-600 rounded-xl py-4 pl-5 pr-14 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-inner"
+                                disabled={loading}
+                            />
+                            <button 
+                                type="submit" 
+                                disabled={loading || !input.trim()}
+                                className="absolute right-2 top-2 h-10 w-10 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg flex items-center justify-center transition-all shadow-md"
+                            >
+                                <i className="fas fa-paper-plane"></i>
+                            </button>
+                        </form>
+                        <div className="text-center mt-2">
+                            <p className="text-[10px] text-slate-500">
+                                AI can make mistakes. Please verify important data.
+                            </p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
