@@ -2,7 +2,7 @@ import os
 import re
 import json
 import sqlite3
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from google import genai
 from dotenv import load_dotenv
@@ -11,27 +11,30 @@ from safety import is_safe_query
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend communication
+# Define Base Paths
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
+DB_PATH = os.path.join(BASE_DIR, "data", "hackathon.db")
+
+# Initialize Flask to serve static files from the frontend folder
+app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
+CORS(app)
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "hackathon.db")
 
 # Configure Gemini Client
 client = None
 if not GEMINI_API_KEY:
     print("WARNING: GEMINI_API_KEY not found in environment variables.")
 else:
-    # New SDK initialization
     client = genai.Client(api_key=GEMINI_API_KEY)
 
 def load_file_content(filename):
     """Safe file reading helper"""
     filepath = os.path.join(PROMPTS_DIR, filename)
     try:
-        # FIX: Added encoding="utf-8" to prevent Windows UnicodeDecodeError
         with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
@@ -43,10 +46,7 @@ SYSTEM_PROMPT = load_file_content("system_prompt.md")
 SCHEMA_CONTEXT = load_file_content("schema.txt")
 
 def parse_gemini_response(text):
-    """
-    Parses the Markdown response from Gemini into a structured dictionary.
-    Expected format defined in system_prompt.md
-    """
+    """Parses the Markdown response from Gemini."""
     response_data = {
         "sql": "",
         "explanation": "",
@@ -57,7 +57,17 @@ def parse_gemini_response(text):
         # Extract SQL
         sql_match = re.search(r"```sql\s*(.*?)\s*```", text, re.DOTALL)
         if sql_match:
-            response_data["sql"] = sql_match.group(1).strip()
+            sql_candidate = sql_match.group(1).strip()
+            
+            # FIX: Clean up potential prefix hallucinations (like "ite SELECT")
+            # We look for the first occurrence of a standard SQL command
+            command_match = re.search(r'\b(SELECT|WITH|INSERT|UPDATE|DELETE)\b', sql_candidate, re.IGNORECASE)
+            if command_match:
+                # Start the string from the found command, removing any garbage prefix
+                response_data["sql"] = sql_candidate[command_match.start():]
+            else:
+                # Fallback if no keyword found (unlikely for valid SQL)
+                response_data["sql"] = sql_candidate
 
         # Extract Explanation
         explanation_match = re.search(r"## Explanation\s*(.*?)\s*(?:## Visualization|$)", text, re.DOTALL)
@@ -76,10 +86,21 @@ def parse_gemini_response(text):
 
     except Exception as e:
         print(f"Parsing error: {e}")
-        if not response_data["explanation"]:
-            response_data["explanation"] = text
+    
+    # FINAL FALLBACK: If regex failed to find a structured "## Explanation",
+    # it means the AI just gave a plain text answer (like a clarification).
+    # In this case, we use the ENTIRE text as the explanation so the user sees it.
+    if not response_data["explanation"]:
+        response_data["explanation"] = text
 
     return response_data
+
+# --- ROUTES ---
+
+@app.route('/')
+def serve_frontend():
+    """Serves the index.html file from the frontend directory"""
+    return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/ask', methods=['POST'])
 def ask():
@@ -90,7 +111,6 @@ def ask():
         if not user_question:
             return jsonify({"success": False, "error": "No question provided"}), 400
 
-        # Construct the full prompt
         full_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
             f"--- DATABASE SCHEMA ---\n"
@@ -100,30 +120,20 @@ def ask():
         )
 
         if not client:
-             return jsonify({"success": False, "error": "Gemini API Key missing or client not initialized"}), 500
+             return jsonify({"success": False, "error": "Gemini API Key missing"}), 500
 
-        # Call Gemini (New SDK usage)
-        # UPDATED: Using 'gemini-flash-latest' to resolve quota issues
+        # Using gemini-flash-latest to ensure free tier quota works
         response = client.models.generate_content(
             model='gemini-flash-latest', 
             contents=full_prompt
         )
-        raw_text = response.text
+        parsed_data = parse_gemini_response(response.text)
 
-        # Parse the structured response
-        parsed_data = parse_gemini_response(raw_text)
-
-        return jsonify({
-            "success": True,
-            **parsed_data
-        })
+        return jsonify({"success": True, **parsed_data})
 
     except Exception as e:
         print(f"API Error: {str(e)}")
-        return jsonify({
-            "success": False, 
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/execute', methods=['POST'])
 def execute_sql():
@@ -134,35 +144,25 @@ def execute_sql():
         if not sql:
             return jsonify({"success": False, "error": "No SQL query provided"}), 400
 
-        # Safety Check
         safe, reason = is_safe_query(sql)
         if not safe:
             return jsonify({"success": False, "error": f"Safety Violation: {reason}"}), 403
 
-        # Execute on SQLite
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         try:
             cursor.execute(sql)
-            
-            # If it's a SELECT query, fetch data
             if cursor.description:
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
             else:
-                # For INSERT/UPDATE/DELETE, commit changes
                 conn.commit()
                 columns = []
                 rows = []
                 
             conn.close()
-
-            return jsonify({
-                "success": True,
-                "columns": columns,
-                "rows": rows
-            })
+            return jsonify({"success": True, "columns": columns, "rows": rows})
             
         except Exception as db_err:
             conn.close()
@@ -171,14 +171,7 @@ def execute_sql():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-@app.route('/', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "online",
-        "message": "SQL Chat Assistant Backend is running.",
-        "endpoints": ["POST /ask", "POST /execute"]
-    })
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    print(f"Server running at http://127.0.0.1:{port}/")
     app.run(debug=True, port=port)
