@@ -5,20 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Chat Assistant</title>
     
-    <!-- 1. STYLES & FONTS -->
+    <!-- 1. STYLES -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- 2. REACT LIBRARIES -->
+    <!-- 2. CORE LIBRARIES -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     
-    <!-- 3. VISUALIZATION LIBRARIES (Order Matters!) -->
-    <!-- Recharts depends on Prop-Types -->
+    <!-- 3. CHARTING (Improved Links) -->
     <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
-    <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.10.3/Recharts.min.js"></script>
     
     <style>
         body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -30,29 +29,26 @@
 </head>
 <body>
     <div id="root" class="h-screen flex flex-col items-center justify-center text-gray-500">
-        <!-- Fallback content if React fails -->
         <i class="fas fa-circle-notch fa-spin text-3xl mb-4"></i>
-        <span>Loading Application...</span>
+        <span>Loading Interface...</span>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
-        
-        // --- SAFE RECHARTS LOADING ---
-        // Prevents crash if Recharts fails to load
-        const RechartsObj = window.Recharts || null;
-        const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = RechartsObj || {};
+        const RechartsObj = window.Recharts;
+        const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = RechartsObj || {};
 
-        const API_BASE = ""; // Empty string = relative path (localhost:5000)
+        const API_BASE = "";
 
-        // --- 1. STYLE CONFIGURATION ---
+        // --- STYLES ---
         const STYLES = {
             layout: "flex flex-col h-full max-w-5xl mx-auto w-full shadow-2xl bg-slate-900",
             header: {
                 base: "p-4 bg-slate-800 border-b border-slate-700 flex items-center justify-between z-10",
                 icon: "w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center shadow-lg",
                 title: "font-bold text-xl text-white tracking-tight",
-                status: "text-xs text-blue-400 flex items-center gap-1"
+                status: "text-xs text-blue-400 flex items-center gap-1",
+                predictBtn: "bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-full flex items-center gap-2 transition-all shadow-lg border border-purple-400/30 font-semibold"
             },
             chat: {
                 container: "flex-1 overflow-y-auto p-4 md:p-6 bg-slate-900 custom-scroll relative",
@@ -68,13 +64,31 @@
             }
         };
 
-        // --- 2. SUB-COMPONENTS ---
-
-        const DataViz = ({ data, type }) => {
-            if (!RechartsObj) return <div className="text-red-400 text-xs p-2">Charts library failed to load.</div>;
+        // --- VISUALIZATION COMPONENT ---
+        const DataViz = ({ data, type, isForecast }) => {
+            if (!RechartsObj) return <div className="p-4 text-red-400 text-xs border border-red-800 bg-red-900/20 rounded">Charts library failed to load. Check internet connection.</div>;
             if (!data || data.length === 0) return null;
+
+            // 1. FORECAST VIEW (Actuals vs Prediction)
+            if (isForecast) {
+                return (
+                    <div className="h-72 w-full mt-4 bg-slate-800/50 rounded-lg p-2 border border-slate-700">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={data}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} />
+                                <YAxis stroke="#94a3b8" fontSize={12} />
+                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
+                                <Legend wrapperStyle={{ paddingTop: '10px' }} />
+                                <Line type="monotone" dataKey="revenue" name="Actual Revenue" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} connectNulls={true} />
+                                <Line type="monotone" dataKey="forecast" name="Predicted Trend" stroke="#f43f5e" strokeWidth={3} strokeDasharray="5 5" dot={{r: 4}} connectNulls={true} />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                );
+            }
             
-            // Auto-detect keys
+            // 2. STANDARD VIEW (Auto-detected)
             const keys = Object.keys(data[0]);
             const labelKey = keys.find(k => typeof data[0][k] === 'string') || keys[0];
             const valueKey = keys.find(k => typeof data[0][k] === 'number') || keys[1];
@@ -105,7 +119,7 @@
         };
 
         const DataTable = ({ data, columns }) => {
-            if (!data || data.length === 0) return <div className="text-gray-400 italic p-4">No data returned.</div>;
+            if (!data || data.length === 0) return null;
             return (
                 <div className="overflow-x-auto custom-scroll mt-4 rounded-lg border border-gray-700">
                     <table className="min-w-full text-sm text-left">
@@ -124,7 +138,7 @@
             );
         };
 
-        const Header = () => (
+        const Header = ({ onPredict }) => (
             <header className={STYLES.header.base}>
                 <div className="flex items-center gap-3">
                     <div className={STYLES.header.icon}><i className="fas fa-database text-white"></i></div>
@@ -133,6 +147,10 @@
                         <p className={STYLES.header.status}><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> System Online</p>
                     </div>
                 </div>
+                {/* PREDICT BUTTON */}
+                <button onClick={onPredict} className={STYLES.header.predictBtn}>
+                    <i className="fas fa-magic"></i> Predict Future
+                </button>
             </header>
         );
 
@@ -140,6 +158,7 @@
             const isUser = message.role === 'user';
             
             const getChartData = () => {
+                if (message.isForecast && message.data) return message.data;
                 if (!message.result || !message.result.rows) return [];
                 const cols = message.result.columns;
                 return message.result.rows.map(row => {
@@ -152,17 +171,13 @@
             return (
                 <div className={`flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-5 shadow-lg ${isUser ? STYLES.chat.bubbleUser : STYLES.chat.bubbleAi}`}>
-                        
-                        {/* Header */}
                         <div className="flex items-center gap-2 mb-2 opacity-75 text-xs font-bold uppercase tracking-wider">
                             {isUser ? <i className="fas fa-user"></i> : <i className="fas fa-robot text-emerald-400"></i>}
                             <span>{isUser ? 'You' : 'Assistant'}</span>
                         </div>
 
-                        {/* Text Content */}
                         <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
 
-                        {/* SQL Block */}
                         {message.sql && (
                             <div className={STYLES.chat.sqlBlock}>
                                 <div className="bg-slate-900 px-3 py-1 text-xs text-gray-400 border-b border-slate-700 flex justify-between items-center">
@@ -172,10 +187,7 @@
                                 <code className={STYLES.chat.code}>{message.sql}</code>
                                 {!message.result && !message.error && (
                                     <div className="p-2 bg-slate-900 border-t border-slate-700 flex justify-end">
-                                        <button 
-                                            onClick={() => onRunSQL(message.id, message.sql)}
-                                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md transition-all flex items-center gap-2"
-                                        >
+                                        <button onClick={() => onRunSQL(message.id, message.sql)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md transition-all flex items-center gap-2">
                                             <i className="fas fa-play"></i> Run Query
                                         </button>
                                     </div>
@@ -183,21 +195,23 @@
                             </div>
                         )}
 
-                        {/* Results */}
-                        {message.result && (
+                        {(message.result || message.isForecast) && (
                             <div className="mt-4 animate-fade-in">
                                 <div className="flex items-center gap-2 text-xs text-emerald-400 mb-1">
                                     <i className="fas fa-chart-pie"></i>
                                     <span>Analysis & Visualization</span>
                                 </div>
-                                {message.visualization && message.visualization.type !== 'table' && (
-                                    <DataViz data={getChartData()} type={message.visualization.type} />
+                                {(message.visualization || message.isForecast) && (
+                                    <DataViz 
+                                        data={getChartData()} 
+                                        type={message.visualization?.type} 
+                                        isForecast={message.isForecast} 
+                                    />
                                 )}
-                                <DataTable data={message.result.rows} columns={message.result.columns} />
+                                {message.result && <DataTable data={message.result.rows} columns={message.result.columns} />}
                             </div>
                         )}
 
-                        {/* Errors */}
                         {message.error && (
                             <div className="mt-4 p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm flex items-start gap-2">
                                 <i className="fas fa-exclamation-triangle mt-1"></i>
@@ -209,48 +223,10 @@
             );
         };
 
-        const ChatHistory = ({ messages, loading, onRunSQL, endRef }) => (
-            <main className={STYLES.chat.container}>
-                {messages.map(m => <MessageBubble key={m.id} message={m} onRunSQL={onRunSQL} />)}
-                {loading && (
-                    <div className="flex justify-start mb-6">
-                         <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-bl-none p-4 flex items-center gap-3">
-                            <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
-                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
-                            </div>
-                            <span className="text-sm text-gray-400">Thinking...</span>
-                        </div>
-                    </div>
-                )}
-                <div ref={endRef} />
-            </main>
-        );
-
-        const ChatInput = ({ input, setInput, handleAsk, loading }) => (
-            <footer className={STYLES.input.container}>
-                <form onSubmit={handleAsk} className="relative max-w-4xl mx-auto">
-                    <input 
-                        type="text" 
-                        className={STYLES.input.field} 
-                        placeholder="Ask about your data..." 
-                        value={input} 
-                        onChange={e => setInput(e.target.value)} 
-                        disabled={loading}
-                    />
-                    <button type="submit" disabled={loading || !input.trim()} className={STYLES.input.button}>
-                        <i className="fas fa-paper-plane"></i>
-                    </button>
-                </form>
-            </footer>
-        );
-
-        // --- 3. MAIN APP ---
         const App = () => {
             const [input, setInput] = useState("");
             const [messages, setMessages] = useState([{
-                id: 1, role: 'ai', content: "Hello! I'm your SQL Assistant. Ask me questions like:\n'Show monthly revenue for 2023' or 'Predict sales for next month'."
+                id: 1, role: 'ai', content: "Hello! I'm your SQL Assistant. Ask me to 'Show revenue trends' or click the Predict button above!"
             }]);
             const [loading, setLoading] = useState(false);
             const messagesEndRef = useRef(null);
@@ -298,21 +274,47 @@
                 }
             };
 
+            const handlePredict = async () => {
+                if (loading) return;
+                setLoading(true);
+                setMessages(p => [...p, { id: Date.now(), role: 'user', content: "🔮 Generate Future Revenue Forecast" }]);
+
+                try {
+                    const res = await axios.get(`${API_BASE}/forecast`);
+                    if (res.data.success) {
+                        setMessages(p => [...p, {
+                            id: Date.now() + 1,
+                            role: 'ai',
+                            content: res.data.explanation,
+                            isForecast: true,
+                            data: res.data.data
+                        }]);
+                    } else {
+                        setMessages(p => [...p, { id: Date.now()+1, role: 'ai', content: "Forecast Error", error: res.data.error }]);
+                    }
+                } catch (err) {
+                    setMessages(p => [...p, { id: Date.now()+1, role: 'ai', content: "Network Error", error: err.message }]);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
             return (
                 <div className={STYLES.layout}>
-                    <Header />
-                    <ChatHistory 
-                        messages={messages} 
-                        loading={loading} 
-                        onRunSQL={handleRunSQL} 
-                        endRef={messagesEndRef} 
-                    />
-                    <ChatInput 
-                        input={input} 
-                        setInput={setInput} 
-                        handleAsk={handleAsk} 
-                        loading={loading} 
-                    />
+                    <Header onPredict={handlePredict} />
+                    <main className={STYLES.chat.container}>
+                        {messages.map(m => <MessageBubble key={m.id} message={m} onRunSQL={handleRunSQL} />)}
+                        {loading && <div className="text-gray-500 text-sm p-4 animate-pulse">Thinking...</div>}
+                        <div ref={messagesEndRef} />
+                    </main>
+                    <footer className={STYLES.input.container}>
+                        <form onSubmit={handleAsk} className="relative max-w-4xl mx-auto">
+                            <input type="text" className={STYLES.input.field} placeholder="Ask about your data..." value={input} onChange={e => setInput(e.target.value)} disabled={loading} />
+                            <button type="submit" disabled={loading || !input.trim()} className={STYLES.input.button}>
+                                <i className="fas fa-paper-plane"></i>
+                            </button>
+                        </form>
+                    </footer>
                 </div>
             );
         };

@@ -7,6 +7,7 @@ from flask_cors import CORS
 from google import genai
 from dotenv import load_dotenv
 from safety import is_safe_query
+from forecast import calculate_forecast
 
 # Load environment variables
 load_dotenv()
@@ -17,7 +18,7 @@ FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
 DB_PATH = os.path.join(BASE_DIR, "data", "hackathon.db")
 
-# Initialize Flask to serve static files from the frontend folder
+# Initialize Flask
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
 CORS(app)
 
@@ -41,12 +42,11 @@ def load_file_content(filename):
         print(f"Error: Could not find {filepath}")
         return ""
 
-# Load context files at startup
 SYSTEM_PROMPT = load_file_content("system_prompt.md")
 SCHEMA_CONTEXT = load_file_content("schema.txt")
 
 def parse_gemini_response(text):
-    """Parses the Markdown response from Gemini."""
+    """Parses the Markdown response from Gemini (Robust Version)."""
     response_data = {
         "sql": "",
         "explanation": "",
@@ -54,52 +54,55 @@ def parse_gemini_response(text):
     }
 
     try:
-        # Extract SQL
+        # 1. SQL Extraction
         sql_match = re.search(r"```sql\s*(.*?)\s*```", text, re.DOTALL)
         if sql_match:
             sql_candidate = sql_match.group(1).strip()
-            
-            # FIX: Clean up potential prefix hallucinations (like "ite SELECT")
-            # We look for the first occurrence of a standard SQL command
+        else:
+            sql_match_loose = re.search(r"(?:##\s*)?SQL\s*(.*?)\s*(?:##\s*)?(?:Explanation|Visualization|$)", text, re.DOTALL | re.IGNORECASE)
+            if sql_match_loose:
+                sql_candidate = sql_match_loose.group(1).strip()
+            else:
+                select_match = re.search(r"(SELECT\s+.*?;)", text, re.DOTALL | re.IGNORECASE)
+                sql_candidate = select_match.group(1).strip() if select_match else ""
+
+        if sql_candidate:
+            sql_candidate = sql_candidate.replace("```sql", "").replace("```", "").strip()
             command_match = re.search(r'\b(SELECT|WITH|INSERT|UPDATE|DELETE)\b', sql_candidate, re.IGNORECASE)
             if command_match:
-                # Start the string from the found command, removing any garbage prefix
                 response_data["sql"] = sql_candidate[command_match.start():]
             else:
-                # Fallback if no keyword found (unlikely for valid SQL)
                 response_data["sql"] = sql_candidate
 
-        # Extract Explanation
-        explanation_match = re.search(r"## Explanation\s*(.*?)\s*(?:## Visualization|$)", text, re.DOTALL)
+        # 2. Explanation Extraction
+        explanation_match = re.search(r"(?:##\s*)?Explanation\s*(.*?)\s*(?:##\s*)?(?:Visualization|$)", text, re.DOTALL | re.IGNORECASE)
         if explanation_match:
             response_data["explanation"] = explanation_match.group(1).strip()
 
-        # Extract Visualization Type
+        # 3. Visualization Extraction
         vis_type_match = re.search(r"\[Type:\s*(.*?)\]", text, re.IGNORECASE)
         if vis_type_match:
-            response_data["visualization"]["type"] = vis_type_match.group(1).strip().lower()
-
-        # Extract Visualization Reason
-        vis_reason_match = re.search(r"\[Reason:\s*(.*?)\]", text, re.IGNORECASE)
-        if vis_reason_match:
-            response_data["visualization"]["reason"] = vis_reason_match.group(1).strip()
+             response_data["visualization"]["type"] = vis_type_match.group(1).strip().lower()
+        else:
+             vis_section = re.search(r"(?:##\s*)?Visualization\s*(.*?)$", text, re.DOTALL | re.IGNORECASE)
+             if vis_section:
+                 vis_text = vis_section.group(1).lower()
+                 if "bar" in vis_text: response_data["visualization"]["type"] = "bar"
+                 elif "line" in vis_text: response_data["visualization"]["type"] = "line"
+                 elif "pie" in vis_text: response_data["visualization"]["type"] = "pie"
 
     except Exception as e:
         print(f"Parsing error: {e}")
     
-    # FINAL FALLBACK: If regex failed to find a structured "## Explanation",
-    # it means the AI just gave a plain text answer (like a clarification).
-    # In this case, we use the ENTIRE text as the explanation so the user sees it.
-    if not response_data["explanation"]:
+    if not response_data["explanation"] and not response_data["sql"]:
         response_data["explanation"] = text
+    elif not response_data["explanation"]:
+        response_data["explanation"] = "Here is the SQL query for your request."
 
     return response_data
 
-# --- ROUTES ---
-
 @app.route('/')
 def serve_frontend():
-    """Serves the index.html file from the frontend directory"""
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/ask', methods=['POST'])
@@ -122,7 +125,6 @@ def ask():
         if not client:
              return jsonify({"success": False, "error": "Gemini API Key missing"}), 500
 
-        # Using gemini-flash-latest to ensure free tier quota works
         response = client.models.generate_content(
             model='gemini-flash-latest', 
             contents=full_prompt
@@ -167,6 +169,40 @@ def execute_sql():
         except Exception as db_err:
             conn.close()
             return jsonify({"success": False, "error": str(db_err)}), 500
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# NEW: Forecast Endpoint
+@app.route('/forecast', methods=['GET', 'POST'])
+def forecast():
+    try:
+        # 1. Fetch Historical Revenue Data (Monthly)
+        query = """
+            SELECT strftime('%Y-%m', order_date) as month, SUM(total_amount) as revenue 
+            FROM orders 
+            GROUP BY month 
+            ORDER BY month ASC
+        """
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        conn.close()
+
+        # 2. Calculate Forecast
+        # rows is list of tuples: [('2023-01', 99.99), ...]
+        forecast_data = calculate_forecast(rows)
+        
+        if isinstance(forecast_data, dict) and "error" in forecast_data:
+             return jsonify({"success": False, "error": forecast_data["error"]})
+
+        return jsonify({
+            "success": True,
+            "data": forecast_data,
+            "explanation": "I analyzed the historical monthly revenue and projected the trend for the next 6 months using Linear Regression (Scikit-Learn)."
+        })
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
