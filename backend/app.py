@@ -125,16 +125,27 @@ def ask():
         if not client:
              return jsonify({"success": False, "error": "Gemini API Key missing"}), 500
 
-        response = client.models.generate_content(
-            model='gemini-flash-latest', 
-            contents=full_prompt
-        )
+        # UPDATE: Trying 'gemini-2.0-flash' (Non-experimental alias)
+        # If this fails, switch back to 'gemini-flash-latest' which is 100% working.
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash', 
+                contents=full_prompt
+            )
+        except Exception as api_error:
+            # Fallback to the reliable model if 2.0 fails
+            print(f"Gemini 2.0 failed: {api_error}. Falling back to Flash Latest.")
+            response = client.models.generate_content(
+                model='gemini-flash-latest',
+                contents=full_prompt
+            )
+
         parsed_data = parse_gemini_response(response.text)
 
         return jsonify({"success": True, **parsed_data})
 
     except Exception as e:
-        print(f"API Error: {str(e)}")
+        print(f"CRITICAL API ERROR: {str(e)}") # Check your terminal for this!
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/execute', methods=['POST'])
