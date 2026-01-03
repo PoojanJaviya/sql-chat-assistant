@@ -1,5 +1,7 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import make_pipeline
 from datetime import datetime
 
 def calculate_forecast(historical_data, months_to_predict=6):
@@ -19,14 +21,16 @@ def calculate_forecast(historical_data, months_to_predict=6):
     values = []
     
     for i, (d_str, val) in enumerate(historical_data):
-        dates_ordinal.append([i]) # Scikit-learn requires 2D array for X (samples, features)
+        dates_ordinal.append([i]) # Scikit-learn requires 2D array
         values.append(float(val))
 
     X = np.array(dates_ordinal)
     y = np.array(values)
 
-    # 2. Scikit-Learn Linear Regression
-    model = LinearRegression()
+    # 2. Scikit-Learn Polynomial Regression (Degree 2 = Curve)
+    # This fits a curve (parabola) instead of a straight line
+    degree = 2 
+    model = make_pipeline(PolynomialFeatures(degree), LinearRegression())
     model.fit(X, y)
 
     # 3. Build Result Set (Historical)
@@ -35,7 +39,7 @@ def calculate_forecast(historical_data, months_to_predict=6):
         results.append({
             "date": d_str,
             "revenue": val,
-            "forecast": None, # Null for forecast on actuals to create disjoint lines if needed
+            "forecast": None, 
             "type": "historical"
         })
 
@@ -65,7 +69,7 @@ def calculate_forecast(historical_data, months_to_predict=6):
         results.append({
             "date": last_date.strftime("%Y-%m"),
             "revenue": None,
-            "forecast": round(max(0, predicted_val), 2), # Clamp to 0 to avoid negative revenue
+            "forecast": round(max(0, predicted_val), 2), # Clamp to 0
             "type": "prediction"
         })
 
