@@ -4,18 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Chat Assistant</title>
-    
-    <!-- 1. STYLES -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- 2. CORE LIBRARIES -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    
-    <!-- 3. CHARTING (Improved Links) -->
     <script src="https://unpkg.com/prop-types/prop-types.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.10.3/Recharts.min.js"></script>
     
@@ -30,17 +24,16 @@
 <body>
     <div id="root" class="h-screen flex flex-col items-center justify-center text-gray-500">
         <i class="fas fa-circle-notch fa-spin text-3xl mb-4"></i>
-        <span>Loading Interface...</span>
+        <span>Loading...</span>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         const RechartsObj = window.Recharts;
-        const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = RechartsObj || {};
+        const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Label } = RechartsObj || {};
 
         const API_BASE = "";
 
-        // --- STYLES ---
         const STYLES = {
             layout: "flex flex-col h-full max-w-5xl mx-auto w-full shadow-2xl bg-slate-900",
             header: {
@@ -48,7 +41,6 @@
                 icon: "w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center shadow-lg",
                 title: "font-bold text-xl text-white tracking-tight",
                 status: "text-xs text-blue-400 flex items-center gap-1",
-                predictBtn: "bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-full flex items-center gap-2 transition-all shadow-lg border border-purple-400/30 font-semibold"
             },
             chat: {
                 container: "flex-1 overflow-y-auto p-4 md:p-6 bg-slate-900 custom-scroll relative",
@@ -64,56 +56,80 @@
             }
         };
 
-        // --- VISUALIZATION COMPONENT ---
-        const DataViz = ({ data, type, isForecast }) => {
-            if (!RechartsObj) return <div className="p-4 text-red-400 text-xs border border-red-800 bg-red-900/20 rounded">Charts library failed to load. Check internet connection.</div>;
+        const DataViz = ({ data, visualization, isForecast }) => {
+            if (!RechartsObj) return null;
             if (!data || data.length === 0) return null;
 
-            // 1. FORECAST VIEW (Actuals vs Prediction)
-            if (isForecast) {
+            // FIX: Don't show charts for single values (e.g., "Total Revenue: 500")
+            if (data.length < 2) return null;
+
+            const { title, x_label, y_label } = visualization || {};
+
+            // Render FORECAST Chart
+            if (isForecast || visualization?.type === 'forecast') {
                 return (
-                    <div className="h-72 w-full mt-4 bg-slate-800/50 rounded-lg p-2 border border-slate-700">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={data}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} />
-                                <YAxis stroke="#94a3b8" fontSize={12} />
-                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
-                                <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                                <Line type="monotone" dataKey="revenue" name="Actual Revenue" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} connectNulls={true} />
-                                <Line type="monotone" dataKey="forecast" name="Predicted Trend" stroke="#f43f5e" strokeWidth={3} strokeDasharray="5 5" dot={{r: 4}} connectNulls={true} />
-                            </LineChart>
-                        </ResponsiveContainer>
+                    <div className="mt-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                        {title && <h3 className="text-sm font-semibold text-gray-300 mb-2 text-center">{title}</h3>}
+                        <div className="h-64 w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={data}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                    <XAxis dataKey="date" stroke="#94a3b8" fontSize={12}>
+                                        {x_label && <Label value={x_label} offset={-5} position="insideBottom" fill="#94a3b8" fontSize={10} />}
+                                    </XAxis>
+                                    <YAxis stroke="#94a3b8" fontSize={12}>
+                                        {y_label && <Label value={y_label} angle={-90} position="insideLeft" fill="#94a3b8" fontSize={10} />}
+                                    </YAxis>
+                                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
+                                    <Legend />
+                                    <Line type="monotone" dataKey="revenue" name="Actual" stroke="#3b82f6" strokeWidth={3} dot={{r: 3}} connectNulls={true} />
+                                    <Line type="monotone" dataKey="forecast" name="Forecast" stroke="#f43f5e" strokeWidth={3} strokeDasharray="5 5" dot={{r: 3}} connectNulls={true} />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
                 );
             }
             
-            // 2. STANDARD VIEW (Auto-detected)
+            if (visualization?.type === 'none') return null;
+
+            // Render STANDARD Chart
             const keys = Object.keys(data[0]);
             const labelKey = keys.find(k => typeof data[0][k] === 'string') || keys[0];
             const valueKey = keys.find(k => typeof data[0][k] === 'number') || keys[1];
 
             return (
-                <div className="h-64 w-full mt-4 bg-slate-800/50 rounded-lg p-2 border border-slate-700">
-                    <ResponsiveContainer width="100%" height="100%">
-                        {type === 'line' ? (
-                            <LineChart data={data}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                <XAxis dataKey={labelKey} stroke="#94a3b8" fontSize={12} />
-                                <YAxis stroke="#94a3b8" fontSize={12} />
-                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
-                                <Line type="monotone" dataKey={valueKey} stroke="#3b82f6" strokeWidth={2} dot={{fill: '#3b82f6'}} />
-                            </LineChart>
-                        ) : (
-                            <BarChart data={data}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                <XAxis dataKey={labelKey} stroke="#94a3b8" fontSize={12} />
-                                <YAxis stroke="#94a3b8" fontSize={12} />
-                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
-                                <Bar dataKey={valueKey} fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                            </BarChart>
-                        )}
-                    </ResponsiveContainer>
+                <div className="mt-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                    {title && <h3 className="text-sm font-semibold text-gray-300 mb-2 text-center">{title}</h3>}
+                    <div className="h-64 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            {visualization?.type === 'line' ? (
+                                <LineChart data={data}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                    <XAxis dataKey={labelKey} stroke="#94a3b8" fontSize={12}>
+                                        {x_label && <Label value={x_label} offset={-5} position="insideBottom" fill="#94a3b8" fontSize={10} />}
+                                    </XAxis>
+                                    <YAxis stroke="#94a3b8" fontSize={12}>
+                                        {y_label && <Label value={y_label} angle={-90} position="insideLeft" fill="#94a3b8" fontSize={10} />}
+                                    </YAxis>
+                                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
+                                    <Line type="monotone" dataKey={valueKey} stroke="#3b82f6" strokeWidth={2} dot={{fill: '#3b82f6'}} />
+                                </LineChart>
+                            ) : (
+                                <BarChart data={data}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                    <XAxis dataKey={labelKey} stroke="#94a3b8" fontSize={12}>
+                                        {x_label && <Label value={x_label} offset={-5} position="insideBottom" fill="#94a3b8" fontSize={10} />}
+                                    </XAxis>
+                                    <YAxis stroke="#94a3b8" fontSize={12}>
+                                        {y_label && <Label value={y_label} angle={-90} position="insideLeft" fill="#94a3b8" fontSize={10} />}
+                                    </YAxis>
+                                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
+                                    <Bar dataKey={valueKey} fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            )}
+                        </ResponsiveContainer>
+                    </div>
                 </div>
             );
         };
@@ -121,9 +137,9 @@
         const DataTable = ({ data, columns }) => {
             if (!data || data.length === 0) return null;
             return (
-                <div className="overflow-x-auto custom-scroll mt-4 rounded-lg border border-gray-700">
+                <div className="overflow-x-auto custom-scroll mt-4 rounded-lg border border-gray-700 max-h-60">
                     <table className="min-w-full text-sm text-left">
-                        <thead className="text-xs uppercase bg-slate-800 text-gray-300">
+                        <thead className="text-xs uppercase bg-slate-800 text-gray-300 sticky top-0">
                             <tr>{columns.map((col, i) => <th key={i} className="px-6 py-3 whitespace-nowrap">{col}</th>)}</tr>
                         </thead>
                         <tbody className="bg-slate-900 divide-y divide-gray-700">
@@ -138,95 +154,10 @@
             );
         };
 
-        const Header = ({ onPredict }) => (
-            <header className={STYLES.header.base}>
-                <div className="flex items-center gap-3">
-                    <div className={STYLES.header.icon}><i className="fas fa-database text-white"></i></div>
-                    <div>
-                        <h1 className={STYLES.header.title}>SQL Chat Assistant</h1>
-                        <p className={STYLES.header.status}><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> System Online</p>
-                    </div>
-                </div>
-                {/* PREDICT BUTTON */}
-                <button onClick={onPredict} className={STYLES.header.predictBtn}>
-                    <i className="fas fa-magic"></i> Predict Future
-                </button>
-            </header>
-        );
-
-        const MessageBubble = ({ message, onRunSQL }) => {
-            const isUser = message.role === 'user';
-            
-            const getChartData = () => {
-                if (message.isForecast && message.data) return message.data;
-                if (!message.result || !message.result.rows) return [];
-                const cols = message.result.columns;
-                return message.result.rows.map(row => {
-                    const obj = {};
-                    cols.forEach((col, i) => obj[col] = row[i]);
-                    return obj;
-                });
-            };
-
-            return (
-                <div className={`flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-5 shadow-lg ${isUser ? STYLES.chat.bubbleUser : STYLES.chat.bubbleAi}`}>
-                        <div className="flex items-center gap-2 mb-2 opacity-75 text-xs font-bold uppercase tracking-wider">
-                            {isUser ? <i className="fas fa-user"></i> : <i className="fas fa-robot text-emerald-400"></i>}
-                            <span>{isUser ? 'You' : 'Assistant'}</span>
-                        </div>
-
-                        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-
-                        {message.sql && (
-                            <div className={STYLES.chat.sqlBlock}>
-                                <div className="bg-slate-900 px-3 py-1 text-xs text-gray-400 border-b border-slate-700 flex justify-between items-center">
-                                    <span>SQL GENERATED</span>
-                                    <span className="text-emerald-500 text-[10px]"><i className="fas fa-check-circle"></i> Validated</span>
-                                </div>
-                                <code className={STYLES.chat.code}>{message.sql}</code>
-                                {!message.result && !message.error && (
-                                    <div className="p-2 bg-slate-900 border-t border-slate-700 flex justify-end">
-                                        <button onClick={() => onRunSQL(message.id, message.sql)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md transition-all flex items-center gap-2">
-                                            <i className="fas fa-play"></i> Run Query
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {(message.result || message.isForecast) && (
-                            <div className="mt-4 animate-fade-in">
-                                <div className="flex items-center gap-2 text-xs text-emerald-400 mb-1">
-                                    <i className="fas fa-chart-pie"></i>
-                                    <span>Analysis & Visualization</span>
-                                </div>
-                                {(message.visualization || message.isForecast) && (
-                                    <DataViz 
-                                        data={getChartData()} 
-                                        type={message.visualization?.type} 
-                                        isForecast={message.isForecast} 
-                                    />
-                                )}
-                                {message.result && <DataTable data={message.result.rows} columns={message.result.columns} />}
-                            </div>
-                        )}
-
-                        {message.error && (
-                            <div className="mt-4 p-3 bg-red-900/30 border border-red-500/50 rounded-lg text-red-200 text-sm flex items-start gap-2">
-                                <i className="fas fa-exclamation-triangle mt-1"></i>
-                                <span>{message.error}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        };
-
         const App = () => {
             const [input, setInput] = useState("");
             const [messages, setMessages] = useState([{
-                id: 1, role: 'ai', content: "Hello! I'm your SQL Assistant. Ask me to 'Show revenue trends' or click the Predict button above!"
+                id: 1, role: 'ai', content: "Hello! I'm your Full-Stack Data Assistant.\n\nTry:\n• 'Forecast sales for next 6 months' (Dynamic!)\n• 'Create a table for Employees'\n• 'Show average revenue'"
             }]);
             const [loading, setLoading] = useState(false);
             const messagesEndRef = useRef(null);
@@ -244,12 +175,14 @@
                 try {
                     const res = await axios.post(`${API_BASE}/ask`, { question: text });
                     if (res.data.success) {
+                        const vizData = res.data.visualization?.data || null; // For forecast
                         setMessages(p => [...p, {
                             id: Date.now() + 1, 
                             role: 'ai', 
                             content: res.data.explanation, 
                             sql: res.data.sql, 
-                            visualization: res.data.visualization 
+                            visualization: res.data.visualization,
+                            forecastData: vizData // Store forecast data if available
                         }]);
                     } else {
                         setMessages(p => [...p, { id: Date.now()+1, role: 'ai', content: "Error", error: res.data.error }]);
@@ -266,7 +199,11 @@
                     const res = await axios.post(`${API_BASE}/execute`, { sql });
                     setMessages(p => p.map(m => m.id === id ? { 
                         ...m, 
-                        result: res.data.success ? { rows: res.data.rows, columns: res.data.columns } : null,
+                        result: res.data.success ? { 
+                            rows: res.data.rows, 
+                            columns: res.data.columns, 
+                            was_modification: res.data.was_modification 
+                        } : null,
                         error: res.data.success ? null : res.data.error 
                     } : m));
                 } catch (err) {
@@ -274,39 +211,86 @@
                 }
             };
 
-            const handlePredict = async () => {
-                if (loading) return;
-                setLoading(true);
-                setMessages(p => [...p, { id: Date.now(), role: 'user', content: "🔮 Generate Future Revenue Forecast" }]);
-
-                try {
-                    const res = await axios.get(`${API_BASE}/forecast`);
-                    if (res.data.success) {
-                        setMessages(p => [...p, {
-                            id: Date.now() + 1,
-                            role: 'ai',
-                            content: res.data.explanation,
-                            isForecast: true,
-                            data: res.data.data
-                        }]);
-                    } else {
-                        setMessages(p => [...p, { id: Date.now()+1, role: 'ai', content: "Forecast Error", error: res.data.error }]);
-                    }
-                } catch (err) {
-                    setMessages(p => [...p, { id: Date.now()+1, role: 'ai', content: "Network Error", error: err.message }]);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
             return (
                 <div className={STYLES.layout}>
-                    <Header onPredict={handlePredict} />
+                    <header className={STYLES.header.base}>
+                        <div className="flex items-center gap-3">
+                            <div className={STYLES.header.icon}><i className="fas fa-database text-white"></i></div>
+                            <div>
+                                <h1 className={STYLES.header.title}>SQL Chat Assistant</h1>
+                                <p className={STYLES.header.status}><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> System Online</p>
+                            </div>
+                        </div>
+                    </header>
+
                     <main className={STYLES.chat.container}>
-                        {messages.map(m => <MessageBubble key={m.id} message={m} onRunSQL={handleRunSQL} />)}
+                        {messages.map(m => (
+                            <div key={m.id} className={`flex w-full mb-6 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-5 shadow-lg ${m.role === 'user' ? STYLES.chat.bubbleUser : STYLES.chat.bubbleAi}`}>
+                                    
+                                    {/* Bubble Content */}
+                                    <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+
+                                    {/* Forecast Chart (Render Immediately) */}
+                                    {m.forecastData && (
+                                        <DataViz 
+                                            data={m.forecastData} 
+                                            visualization={m.visualization} 
+                                            isForecast={true} 
+                                        />
+                                    )}
+
+                                    {/* SQL Block (For non-forecast queries) */}
+                                    {!m.forecastData && m.sql && (
+                                        <div className={STYLES.chat.sqlBlock}>
+                                            <div className="bg-slate-900 px-3 py-1 text-xs text-gray-400 border-b border-slate-700 flex justify-between items-center">
+                                                <span>SQL GENERATED</span>
+                                            </div>
+                                            <code className={STYLES.chat.code}>{m.sql}</code>
+                                            {!m.result && !m.error && (
+                                                <div className="p-2 bg-slate-900 border-t border-slate-700 flex justify-end">
+                                                    <button onClick={() => handleRunSQL(m.id, m.sql)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-md transition-all flex items-center gap-2">
+                                                        <i className="fas fa-play"></i> Run Query
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Standard Results */}
+                                    {m.result && (
+                                        <div className="mt-4 animate-fade-in">
+                                            {m.result.was_modification ? (
+                                                <div className="p-3 bg-emerald-900/30 border border-emerald-500/50 rounded-lg text-emerald-300 text-sm flex items-center gap-2">
+                                                    <i className="fas fa-check-circle"></i> Success! Database updated.
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <DataViz 
+                                                        data={(() => {
+                                                            if (!m.result.rows) return [];
+                                                            const cols = m.result.columns;
+                                                            return m.result.rows.map(row => {
+                                                                const obj = {};
+                                                                cols.forEach((col, i) => obj[col] = row[i]);
+                                                                return obj;
+                                                            });
+                                                        })()} 
+                                                        visualization={m.visualization} 
+                                                    />
+                                                    <DataTable data={m.result.rows} columns={m.result.columns} />
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                    {m.error && <div className="mt-4 p-3 bg-red-900/30 border border-red-500/50 rounded text-red-200 text-sm">{m.error}</div>}
+                                </div>
+                            </div>
+                        ))}
                         {loading && <div className="text-gray-500 text-sm p-4 animate-pulse">Thinking...</div>}
                         <div ref={messagesEndRef} />
                     </main>
+
                     <footer className={STYLES.input.container}>
                         <form onSubmit={handleAsk} className="relative max-w-4xl mx-auto">
                             <input type="text" className={STYLES.input.field} placeholder="Ask about your data..." value={input} onChange={e => setInput(e.target.value)} disabled={loading} />

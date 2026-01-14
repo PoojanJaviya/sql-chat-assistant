@@ -12,14 +12,11 @@ def is_safe_query(sql: str) -> tuple[bool, str]:
     cleaned_sql = sql.strip()
     upper_sql = cleaned_sql.upper()
 
-    # Rule 3: Block multiple statements
-    # Allow a semicolon only if it's the very last character
-    if ';' in cleaned_sql[:-1]:
-        return False, "Multiple SQL statements are not allowed."
+    # REMOVED: Rule 3 (Block multiple statements)
+    # Since we support creating tables/inserting data via executescript, we allow semicolons.
 
     # Rule 1: Block dangerous commands
-    # Using word boundaries (\b) to ensure we don't catch parts of other words
-    forbidden_commands = ["DROP", "TRUNCATE", "ALTER", "ATTACH", "DETACH", "GRANT", "REVOKE", "PRAGMA"]
+    forbidden_commands = ["DROP", "TRUNCATE", "ATTACH", "DETACH", "GRANT", "REVOKE", "PRAGMA"]
     
     for cmd in forbidden_commands:
         if re.search(r'\b' + cmd + r'\b', upper_sql):
@@ -35,7 +32,6 @@ def is_safe_query(sql: str) -> tuple[bool, str]:
             return False, "Destructive command (DELETE/UPDATE) requires a WHERE clause."
         
         # Extract condition after WHERE
-        # Split on the first occurrence of WHERE
         parts = upper_sql.split("WHERE", 1)
         if len(parts) < 2:
             return False, "Invalid WHERE clause format."
@@ -43,14 +39,10 @@ def is_safe_query(sql: str) -> tuple[bool, str]:
         condition = parts[1].strip()
 
         # Check for vague conditions (e.g., 1=1, TRUE)
-        # Matches 1=1, 0=0, 99 = 99
         if re.search(r'(\d+)\s*=\s*\1', condition):
             return False, "Unsafe WHERE clause detected (Identity pattern 1=1)."
             
-        # Matches explicit TRUE
         if re.search(r'\bTRUE\b', condition):
             return False, "Unsafe WHERE clause detected (TRUE)."
 
-    # Rule 4: SELECT queries are generally safe (passed implicitly if no other rules broke)
     return True, ""
-
